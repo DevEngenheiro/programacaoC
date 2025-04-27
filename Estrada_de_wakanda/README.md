@@ -1,1 +1,0 @@
-Estrada de Wakabda - Exercício
