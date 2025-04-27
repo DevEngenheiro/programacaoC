@@ -3,147 +3,155 @@
 #include <string.h>
 #include "cidades.h"
 
-int compararCidades(const void *a, const void *b) {
-    Cidade *c1 = (Cidade *)a;
-    Cidade *c2 = (Cidade *)b;
-    return c1->Posicao - c2->Posicao;
+static int cmpCidade(const void *a, const void *b) {
+    const Cidade *ca = a;
+    const Cidade *cb = b;
+    return ca->Posicao - cb->Posicao;
 }
 
 Estrada *getEstrada(const char *nomeArquivo) {
-    FILE *arquivo = fopen(nomeArquivo, "r");
-    if (!arquivo) return NULL;
+    FILE *fp = fopen(nomeArquivo, "r");
+    if (!fp) return NULL;
 
-    Estrada *e = (Estrada *)malloc(sizeof(Estrada));
-    if (!e) {
-        fclose(arquivo);
+    int T, N;
+    if (fscanf(fp, "%d", &T) != 1 || T < 3 || T > 1000000) {
+        fclose(fp);
+        return NULL;
+    }
+    if (fscanf(fp, "%d", &N) != 1 || N < 2 || N > 10000) {
+        fclose(fp);
         return NULL;
     }
 
-    if (fscanf(arquivo, "%d", &(e->T)) != 1 || e->T < 3 || e->T > 1000000) {
-        fclose(arquivo);
-        free(e);
-        return NULL;
-    }
+    Estrada *e = malloc(sizeof(Estrada));
+    if (!e) { fclose(fp); return NULL; }
+    e->T = T;
+    e->N = N;
+    e->C = malloc(sizeof(Cidade) * N);
+    if (!e->C) { free(e); fclose(fp); return NULL; }
 
-    if (fscanf(arquivo, "%d", &(e->N)) != 1 || e->N < 2 || e->N > 10000) {
-        fclose(arquivo);
-        free(e);
-        return NULL;
-    }
+    /* descarta o restante da segunda linha */
+    char line[1024];
+    fgets(line, sizeof(line), fp);
 
-    e->C = (Cidade *)malloc(e->N * sizeof(Cidade));
-    if (!e->C) {
-        fclose(arquivo);
-        free(e);
-        return NULL;
-    }
-
-    for (int i = 0; i < e->N; i++) {
-        if (fscanf(arquivo, "%d %[^\n]", &(e->C[i].Posicao), e->C[i].Nome) != 2) {
+    for (int i = 0; i < N; i++) {
+        if (!fgets(line, sizeof(line), fp)) {
             free(e->C);
             free(e);
-            fclose(arquivo);
+            fclose(fp);
             return NULL;
         }
 
-        if (e->C[i].Posicao <= 0 || e->C[i].Posicao >= e->T) {
+        /* lê posição */
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        char *endptr;
+        long pos = strtol(p, &endptr, 10);
+        if (endptr == p || pos <= 0 || pos >= T) {
             free(e->C);
             free(e);
-            fclose(arquivo);
+            fclose(fp);
             return NULL;
         }
 
-        // Vê se a posição já existe
-        for (int j = 0; j < i; j++) {
-            if (e->C[i].Posicao == e->C[j].Posicao) {
-                free(e->C);
-                free(e);
-                fclose(arquivo);
-                return NULL;
-            }
+        /* lê nome da cidade (resto da linha) */
+        p = endptr;
+        while (*p == ' ' || *p == '\t') p++;
+        char *q = p + strlen(p) - 1;
+        while (q >= p && (*q == '\n' || *q == '\r')) *q-- = '\0';
+
+        e->C[i].Posicao = (int)pos;
+        strncpy(e->C[i].Nome, p, sizeof(e->C[i].Nome)-1);
+        e->C[i].Nome[sizeof(e->C[i].Nome)-1] = '\0';
+    }
+
+    fclose(fp);
+
+    /* ordena por posição e verifica duplicatas */
+    qsort(e->C, e->N, sizeof(Cidade), cmpCidade);
+    for (int i = 1; i < e->N; i++) {
+        if (e->C[i].Posicao == e->C[i-1].Posicao) {
+            free(e->C);
+            free(e);
+            return NULL;
         }
     }
 
-    fclose(arquivo);
     return e;
-}
-
-void calcularVizinhanças(Estrada *e, double *vizinhas) {
-    qsort(e->C, e->N, sizeof(Cidade), compararCidades);
-
-    for (int i = 0; i < e->N; i++) {
-        double inicio, fim;
-        if (i == 0) {
-            inicio = 0;
-        } else {
-            inicio = (e->C[i].Posicao + e->C[i - 1].Posicao) / 2.0;
-        }
-
-        if (i == e->N - 1) {
-            fim = e->T;
-        } else {
-            fim = (e->C[i].Posicao + e->C[i + 1].Posicao) / 2.0;
-        }
-
-        vizinhas[i] = fim - inicio;
-    }
 }
 
 double calcularMenorVizinhanca(const char *nomeArquivo) {
     Estrada *e = getEstrada(nomeArquivo);
-    if (!e) return -1.0;
+    if (!e) return 0.0;
 
-    double *vizinhas = (double *)malloc(sizeof(double) * e->N);
-    if (!vizinhas) {
-        free(e->C);
-        free(e);
-        return -1.0;
+    int N = e->N;
+    double minViz;
+    /* cidade 0 */
+    double left = 0.0;
+    double right = (e->C[0].Posicao + e->C[1].Posicao) / 2.0;
+    minViz = right - left;
+
+    /* cidades intermediárias */
+    for (int i = 1; i < N-1; i++) {
+        left  = (e->C[i-1].Posicao + e->C[i].Posicao) / 2.0;
+        right = (e->C[i].Posicao   + e->C[i+1].Posicao) / 2.0;
+        double viz = right - left;
+        if (viz < minViz) minViz = viz;
     }
 
-    calcularVizinhanças(e, vizinhas);
-
-    double menor = vizinhas[0];
-    for (int i = 1; i < e->N; i++) {
-        if (vizinhas[i] < menor) {
-            menor = vizinhas[i];
-        }
+    /* última cidade */
+    left  = (e->C[N-2].Posicao + e->C[N-1].Posicao) / 2.0;
+    right = (double)e->T;
+    {
+        double viz = right - left;
+        if (viz < minViz) minViz = viz;
     }
 
-    free(vizinhas);
     free(e->C);
     free(e);
-    return menor;
+    return minViz;
 }
 
 char *cidadeMenorVizinhanca(const char *nomeArquivo) {
     Estrada *e = getEstrada(nomeArquivo);
     if (!e) return NULL;
 
-    double *vizinhas = (double *)malloc(sizeof(double) * e->N);
-    if (!vizinhas) {
-        free(e->C);
-        free(e);
-        return NULL;
-    }
+    int N = e->N;
+    double minViz;
+    int idxMin = 0;
 
-    calcularVizinhanças(e, vizinhas);
+    /* cidade 0 */
+    double left = 0.0;
+    double right = (e->C[0].Posicao + e->C[1].Posicao) / 2.0;
+    minViz = right - left;
 
-    double menor = vizinhas[0];
-    int idx = 0;
-    for (int i = 1; i < e->N; i++) {
-        if (vizinhas[i] < menor) {
-            menor = vizinhas[i];
-            idx = i;
+    /* cidades intermediárias */
+    for (int i = 1; i < N-1; i++) {
+        left  = (e->C[i-1].Posicao + e->C[i].Posicao) / 2.0;
+        right = (e->C[i].Posicao   + e->C[i+1].Posicao) / 2.0;
+        double viz = right - left;
+        if (viz < minViz) {
+            minViz = viz;
+            idxMin = i;
         }
     }
 
-    char *resultado = (char *)malloc(strlen(e->C[idx].Nome) + 1);
-    if (resultado) {
-        strcpy(resultado, e->C[idx].Nome);
+    /* última cidade */
+    left  = (e->C[N-2].Posicao + e->C[N-1].Posicao) / 2.0;
+    right = (double)e->T;
+    {
+        double viz = right - left;
+        if (viz < minViz) {
+            minViz = viz;
+            idxMin = N-1;
+        }
     }
 
-    free(vizinhas);
+    /* retorna o nome */
+    char *res = malloc(strlen(e->C[idxMin].Nome) + 1);
+    if (res) strcpy(res, e->C[idxMin].Nome);
+
     free(e->C);
     free(e);
-    return resultado;
+    return res;
 }
